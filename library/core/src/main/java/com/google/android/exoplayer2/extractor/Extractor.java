@@ -15,9 +15,10 @@
  */
 package com.google.android.exoplayer2.extractor;
 
-import android.support.annotation.IntDef;
+import androidx.annotation.IntDef;
 import com.google.android.exoplayer2.C;
 import java.io.IOException;
+import java.lang.annotation.Documented;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 
@@ -48,6 +49,7 @@ public interface Extractor {
    * Result values that can be returned by {@link #read(ExtractorInput, PositionHolder)}. One of
    * {@link #RESULT_CONTINUE}, {@link #RESULT_SEEK} or {@link #RESULT_END_OF_INPUT}.
    */
+  @Documented
   @Retention(RetentionPolicy.SOURCE)
   @IntDef(value = {RESULT_CONTINUE, RESULT_SEEK, RESULT_END_OF_INPUT})
   @interface ReadResult {}
@@ -86,6 +88,10 @@ public interface Extractor {
    * provided from a different position, then that position is set in {@code seekPosition} and
    * {@link #RESULT_SEEK} is returned. If the extractor reached the end of the data provided by the
    * {@link ExtractorInput}, then {@link #RESULT_END_OF_INPUT} is returned.
+   *
+   * <p>When this method throws an {@link IOException} or an {@link InterruptedException},
+   * extraction may continue by providing an {@link ExtractorInput} with an unchanged {@link
+   * ExtractorInput#getPosition() read position} to a subsequent call to this method.
    *
    * @param input The {@link ExtractorInput} from which data should be read.
    * @param seekPosition If {@link #RESULT_SEEK} is returned, this holder is updated to hold the

@@ -168,8 +168,7 @@ public final class PsExtractor implements Extractor {
     }
     maybeOutputSeekMap(inputLength);
     if (psBinarySearchSeeker != null && psBinarySearchSeeker.isSeeking()) {
-      return psBinarySearchSeeker.handlePendingSeek(
-          input, seekPosition, /* outputFrameHolder= */ null);
+      return psBinarySearchSeeker.handlePendingSeek(input, seekPosition);
     }
 
     input.resetPeekPosition();
@@ -343,7 +342,7 @@ public final class PsExtractor implements Extractor {
       data.readBytes(pesScratch.data, 0, extendedHeaderLength);
       pesScratch.setPosition(0);
       parseHeaderExtension();
-      pesPayloadReader.packetStarted(timeUs, true);
+      pesPayloadReader.packetStarted(timeUs, TsPayloadReader.FLAG_DATA_ALIGNMENT_INDICATOR);
       pesPayloadReader.consume(data);
       // We always have complete PES packets with program stream.
       pesPayloadReader.packetFinished();

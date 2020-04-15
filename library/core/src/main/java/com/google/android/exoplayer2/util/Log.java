@@ -15,11 +15,13 @@
  */
 package com.google.android.exoplayer2.util;
 
-import android.support.annotation.IntDef;
-import android.support.annotation.Nullable;
 import android.text.TextUtils;
+import androidx.annotation.IntDef;
+import androidx.annotation.Nullable;
+import java.lang.annotation.Documented;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
+import java.net.UnknownHostException;
 
 /** Wrapper around {@link android.util.Log} which allows to set the log level. */
 public final class Log {
@@ -28,6 +30,7 @@ public final class Log {
    * Log level for ExoPlayer logcat logging. One of {@link #LOG_LEVEL_ALL}, {@link #LOG_LEVEL_INFO},
    * {@link #LOG_LEVEL_WARNING}, {@link #LOG_LEVEL_ERROR} or {@link #LOG_LEVEL_OFF}.
    */
+  @Documented
   @Retention(RetentionPolicy.SOURCE)
   @IntDef({LOG_LEVEL_ALL, LOG_LEVEL_INFO, LOG_LEVEL_WARNING, LOG_LEVEL_ERROR, LOG_LEVEL_OFF})
   @interface LogLevel {}
@@ -67,7 +70,8 @@ public final class Log {
   }
 
   /**
-   * Sets whether stack traces of {@link Throwable}s will be logged to logcat.
+   * Sets whether stack traces of {@link Throwable}s will be logged to logcat. Stack trace logging
+   * is enabled by default.
    *
    * @param logStackTraces Whether stack traces will be logged.
    */
@@ -84,12 +88,7 @@ public final class Log {
 
   /** @see android.util.Log#d(String, String, Throwable) */
   public static void d(String tag, String message, @Nullable Throwable throwable) {
-    if (!logStackTraces) {
-      d(tag, appendThrowableMessage(message, throwable));
-    }
-    if (logLevel == LOG_LEVEL_ALL) {
-      android.util.Log.d(tag, message, throwable);
-    }
+    d(tag, appendThrowableString(message, throwable));
   }
 
   /** @see android.util.Log#i(String, String) */
@@ -101,12 +100,7 @@ public final class Log {
 
   /** @see android.util.Log#i(String, String, Throwable) */
   public static void i(String tag, String message, @Nullable Throwable throwable) {
-    if (!logStackTraces) {
-      i(tag, appendThrowableMessage(message, throwable));
-    }
-    if (logLevel <= LOG_LEVEL_INFO) {
-      android.util.Log.i(tag, message, throwable);
-    }
+    i(tag, appendThrowableString(message, throwable));
   }
 
   /** @see android.util.Log#w(String, String) */
@@ -118,12 +112,7 @@ public final class Log {
 
   /** @see android.util.Log#w(String, String, Throwable) */
   public static void w(String tag, String message, @Nullable Throwable throwable) {
-    if (!logStackTraces) {
-      w(tag, appendThrowableMessage(message, throwable));
-    }
-    if (logLevel <= LOG_LEVEL_WARNING) {
-      android.util.Log.w(tag, message, throwable);
-    }
+    w(tag, appendThrowableString(message, throwable));
   }
 
   /** @see android.util.Log#e(String, String) */
@@ -135,19 +124,54 @@ public final class Log {
 
   /** @see android.util.Log#e(String, String, Throwable) */
   public static void e(String tag, String message, @Nullable Throwable throwable) {
-    if (!logStackTraces) {
-      e(tag, appendThrowableMessage(message, throwable));
-    }
-    if (logLevel <= LOG_LEVEL_ERROR) {
-      android.util.Log.e(tag, message, throwable);
+    e(tag, appendThrowableString(message, throwable));
+  }
+
+  /**
+   * Returns a string representation of a {@link Throwable} suitable for logging, taking into
+   * account whether {@link #setLogStackTraces(boolean)} stack trace logging} is enabled.
+   *
+   * <p>Stack trace logging may be unconditionally suppressed for some expected failure modes (e.g.,
+   * {@link Throwable Throwables} that are expected if the device doesn't have network connectivity)
+   * to avoid log spam.
+   *
+   * @param throwable The {@link Throwable}.
+   * @return The string representation of the {@link Throwable}.
+   */
+  @Nullable
+  public static String getThrowableString(@Nullable Throwable throwable) {
+    if (throwable == null) {
+      return null;
+    } else if (isCausedByUnknownHostException(throwable)) {
+      // UnknownHostException implies the device doesn't have network connectivity.
+      // UnknownHostException.getMessage() may return a string that's more verbose than desired for
+      // logging an expected failure mode. Conversely, android.util.Log.getStackTraceString has
+      // special handling to return the empty string, which can result in logging that doesn't
+      // indicate the failure mode at all. Hence we special case this exception to always return a
+      // concise but useful message.
+      return "UnknownHostException (no network)";
+    } else if (!logStackTraces) {
+      return throwable.getMessage();
+    } else {
+      return android.util.Log.getStackTraceString(throwable).trim().replace("\t", "    ");
     }
   }
 
-  private static String appendThrowableMessage(String message, @Nullable Throwable throwable) {
-    if (throwable == null) {
-      return message;
+  private static String appendThrowableString(String message, @Nullable Throwable throwable) {
+    @Nullable String throwableString = getThrowableString(throwable);
+    if (!TextUtils.isEmpty(throwableString)) {
+      message += "\n  " + throwableString.replace("\n", "\n  ") + '\n';
     }
-    String throwableMessage = throwable.getMessage();
-    return TextUtils.isEmpty(throwableMessage) ? message : message + " - " + throwableMessage;
+    return message;
+  }
+
+  private static boolean isCausedByUnknownHostException(@Nullable Throwable throwable) {
+    while (throwable != null) {
+      if (throwable instanceof UnknownHostException) {
+        return true;
+      }
+      throwable = throwable.getCause();
+    }
+    return false;
   }
 }

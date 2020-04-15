@@ -12,7 +12,7 @@ track 0:
     maxInputSize = 36722
     width = 1080
     height = 720
-    frameRate = -1.0
+    frameRate = 29.970028
     rotationDegrees = 0
     pixelWidthHeightRatio = 1.0
     channelCount = -1
@@ -24,6 +24,7 @@ track 0:
     selectionFlags = 0
     language = null
     drmInitData = -
+    metadata = null
     initializationData:
       data = length 29, hash 4746B5D9
       data = length 10, hash 7A0D0F2B
@@ -147,7 +148,7 @@ track 0:
     data = length 530, hash C98BC6A8
   sample 29:
     time = 934266
-    flags = 0
+    flags = 536870912
     data = length 568, hash 4FE5C8EA
 track 1:
   format:
@@ -170,6 +171,7 @@ track 1:
     selectionFlags = 0
     language = und
     drmInitData = -
+    metadata = entries=[TSSE: description=null: value=Lavf56.1.0]
     initializationData:
       data = length 2, hash 5F7
   total output bytes = 9529
@@ -352,6 +354,6 @@ track 1:
     data = length 229, hash FFF98DF0
   sample 44:
     time = 1065678
-    flags = 1
+    flags = 536870913
     data = length 6, hash 31B22286
 tracksEnded = true

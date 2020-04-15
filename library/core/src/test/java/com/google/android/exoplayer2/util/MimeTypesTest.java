@@ -17,12 +17,12 @@ package com.google.android.exoplayer2.util;
 
 import static com.google.common.truth.Truth.assertThat;
 
+import androidx.test.ext.junit.runners.AndroidJUnit4;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.RobolectricTestRunner;
 
 /** Unit test for {@link MimeTypes}. */
-@RunWith(RobolectricTestRunner.class)
+@RunWith(AndroidJUnit4.class)
 public final class MimeTypesTest {
 
   @Test
@@ -73,6 +73,10 @@ public final class MimeTypesTest {
     assertThat(MimeTypes.getMediaMimeType("mp4a.AA")).isEqualTo(MimeTypes.AUDIO_DTS_HD);
     assertThat(MimeTypes.getMediaMimeType("mp4a.AB")).isEqualTo(MimeTypes.AUDIO_DTS_HD);
     assertThat(MimeTypes.getMediaMimeType("mp4a.AD")).isEqualTo(MimeTypes.AUDIO_OPUS);
+
+    assertThat(MimeTypes.getMediaMimeType("wvtt")).isEqualTo(MimeTypes.TEXT_VTT);
+    assertThat(MimeTypes.getMediaMimeType("stpp.")).isEqualTo(MimeTypes.APPLICATION_TTML);
+    assertThat(MimeTypes.getMediaMimeType("stpp.ttml.im1t")).isEqualTo(MimeTypes.APPLICATION_TTML);
   }
 
   @Test
