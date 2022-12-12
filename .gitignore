@@ -47,6 +47,7 @@ bazel-testlogs
 .DS_Store
 cmake-build-debug
 dist
+jacoco.exec
 tmp
 
 # External native builds
@@ -75,3 +76,6 @@ extensions/cronet/jniLibs/*
 !extensions/cronet/jniLibs/README.md
 extensions/cronet/libs/*
 !extensions/cronet/libs/README.md
+
+# MIDI extension
+extensions/midi/lib

@@ -16,45 +16,45 @@
 package com.google.android.exoplayer2.testutil;
 
 import static com.google.common.truth.Truth.assertThat;
+import static java.lang.Math.min;
 
 import android.util.SparseBooleanArray;
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.extractor.ExtractorInput;
 import com.google.android.exoplayer2.util.Util;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import java.io.EOFException;
 import java.io.IOException;
 
 /**
  * A fake {@link ExtractorInput} capable of simulating various scenarios.
- * <p>
- * Read, skip and peek errors can be simulated using {@link Builder#setSimulateIOErrors}. When
+ *
+ * <p>Read, skip and peek errors can be simulated using {@link Builder#setSimulateIOErrors}. When
  * enabled each read and skip will throw a {@link SimulatedIOException} unless one has already been
  * thrown from the current position. Each peek will throw {@link SimulatedIOException} unless one
  * has already been thrown from the current peek position. When a {@link SimulatedIOException} is
  * thrown the read position is left unchanged and the peek position is reset back to the read
  * position.
- * <p>
- * Partial reads and skips can be simulated using {@link Builder#setSimulatePartialReads}. When
+ *
+ * <p>Partial reads and skips can be simulated using {@link Builder#setSimulatePartialReads}. When
  * enabled, {@link #read(byte[], int, int)} and {@link #skip(int)} calls will only read or skip a
  * single byte unless a partial read or skip has already been performed that had the same target
- * position. For example, a first read request for 10 bytes will be partially satisfied by reading
- * a single byte and advancing the position to 1. If the following read request attempts to read 9
+ * position. For example, a first read request for 10 bytes will be partially satisfied by reading a
+ * single byte and advancing the position to 1. If the following read request attempts to read 9
  * bytes then it will be fully satisfied, since it has the same target position of 10.
- * <p>
- * Unknown data length can be simulated using {@link Builder#setSimulateUnknownLength}. When enabled
- * {@link #getLength()} will return {@link C#LENGTH_UNSET} rather than the length of the data.
+ *
+ * <p>Unknown data length can be simulated using {@link Builder#setSimulateUnknownLength}. When
+ * enabled {@link #getLength()} will return {@link C#LENGTH_UNSET} rather than the length of the
+ * data.
  */
 public final class FakeExtractorInput implements ExtractorInput {
 
-  /**
-   * Thrown when simulating an {@link IOException}.
-   */
+  /** Thrown when simulating an {@link IOException}. */
   public static final class SimulatedIOException extends IOException {
 
     public SimulatedIOException(String message) {
       super(message);
     }
-
   }
 
   private final byte[] data;
@@ -70,8 +70,11 @@ public final class FakeExtractorInput implements ExtractorInput {
   private final SparseBooleanArray failedReadPositions;
   private final SparseBooleanArray failedPeekPositions;
 
-  private FakeExtractorInput(byte[] data, boolean simulateUnknownLength,
-      boolean simulatePartialReads, boolean simulateIOErrors) {
+  private FakeExtractorInput(
+      byte[] data,
+      boolean simulateUnknownLength,
+      boolean simulatePartialReads,
+      boolean simulateIOErrors) {
     this.data = data;
     this.simulateUnknownLength = simulateUnknownLength;
     this.simulatePartialReads = simulatePartialReads;
@@ -98,17 +101,17 @@ public final class FakeExtractorInput implements ExtractorInput {
    * @param position The position to set.
    */
   public void setPosition(int position) {
-    assertThat(0 <= position).isTrue();
-    assertThat(position <= data.length).isTrue();
+    assertThat(position).isAtLeast(0);
+    assertThat(position).isAtMost(data.length);
     readPosition = position;
     peekPosition = position;
   }
 
   @Override
-  public int read(byte[] target, int offset, int length) throws IOException {
+  public int read(byte[] buffer, int offset, int length) throws IOException {
     checkIOException(readPosition, failedReadPositions);
     length = getLengthToRead(readPosition, length, partiallySatisfiedTargetReadPositions);
-    return readFullyInternal(target, offset, length, true) ? length : C.RESULT_END_OF_INPUT;
+    return readFullyInternal(buffer, offset, length, true) ? length : C.RESULT_END_OF_INPUT;
   }
 
   @Override
@@ -220,8 +223,13 @@ public final class FakeExtractorInput implements ExtractorInput {
       throw new EOFException();
     }
     if (position + length > data.length) {
-      throw new EOFException("Attempted to move past end of data: (" + position + " + "
-          + length + ") > " + data.length);
+      throw new EOFException(
+          "Attempted to move past end of data: ("
+              + position
+              + " + "
+              + length
+              + ") > "
+              + data.length);
     }
     return true;
   }
@@ -233,12 +241,13 @@ public final class FakeExtractorInput implements ExtractorInput {
       return requestedLength == 0 ? 0 : Integer.MAX_VALUE;
     }
     int targetPosition = position + requestedLength;
-    if (simulatePartialReads && requestedLength > 1
+    if (simulatePartialReads
+        && requestedLength > 1
         && !partiallySatisfiedTargetPositions.get(targetPosition)) {
       partiallySatisfiedTargetPositions.put(targetPosition, true);
       return 1;
     }
-    return Math.min(requestedLength, data.length - position);
+    return min(requestedLength, data.length - position);
   }
 
   private boolean readFullyInternal(byte[] target, int offset, int length, boolean allowEndOfInput)
@@ -271,9 +280,7 @@ public final class FakeExtractorInput implements ExtractorInput {
     return true;
   }
 
-  /**
-   * Builder of {@link FakeExtractorInput} instances.
-   */
+  /** Builder of {@link FakeExtractorInput} instances. */
   public static final class Builder {
 
     private byte[] data;
@@ -285,31 +292,33 @@ public final class FakeExtractorInput implements ExtractorInput {
       data = Util.EMPTY_BYTE_ARRAY;
     }
 
+    @CanIgnoreReturnValue
     public Builder setData(byte[] data) {
       this.data = data;
       return this;
     }
 
+    @CanIgnoreReturnValue
     public Builder setSimulateUnknownLength(boolean simulateUnknownLength) {
       this.simulateUnknownLength = simulateUnknownLength;
       return this;
     }
 
+    @CanIgnoreReturnValue
     public Builder setSimulatePartialReads(boolean simulatePartialReads) {
       this.simulatePartialReads = simulatePartialReads;
       return this;
     }
 
+    @CanIgnoreReturnValue
     public Builder setSimulateIOErrors(boolean simulateIOErrors) {
       this.simulateIOErrors = simulateIOErrors;
       return this;
     }
 
     public FakeExtractorInput build() {
-      return new FakeExtractorInput(data, simulateUnknownLength, simulatePartialReads,
-          simulateIOErrors);
+      return new FakeExtractorInput(
+          data, simulateUnknownLength, simulatePartialReads, simulateIOErrors);
     }
-
   }
-
 }

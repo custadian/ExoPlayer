@@ -15,21 +15,29 @@
  */
 package com.google.android.exoplayer2.metadata;
 
+import static com.google.android.exoplayer2.testutil.FakeSampleStream.FakeSampleStreamItem.END_OF_STREAM_ITEM;
+import static com.google.android.exoplayer2.testutil.FakeSampleStream.FakeSampleStreamItem.sample;
 import static com.google.common.truth.Truth.assertThat;
 import static java.nio.charset.StandardCharsets.ISO_8859_1;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.ExoPlaybackException;
 import com.google.android.exoplayer2.Format;
+import com.google.android.exoplayer2.drm.DrmSessionEventListener;
+import com.google.android.exoplayer2.drm.DrmSessionManager;
 import com.google.android.exoplayer2.metadata.emsg.EventMessage;
 import com.google.android.exoplayer2.metadata.emsg.EventMessageEncoder;
 import com.google.android.exoplayer2.metadata.id3.TextInformationFrame;
 import com.google.android.exoplayer2.metadata.scte35.TimeSignalCommand;
 import com.google.android.exoplayer2.testutil.FakeSampleStream;
 import com.google.android.exoplayer2.testutil.TestUtil;
+import com.google.android.exoplayer2.upstream.DefaultAllocator;
 import com.google.android.exoplayer2.util.Assertions;
 import com.google.android.exoplayer2.util.MimeTypes;
+import com.google.common.collect.ImmutableList;
+import com.google.common.primitives.Bytes;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -41,7 +49,7 @@ import org.junit.runner.RunWith;
 public class MetadataRendererTest {
 
   private static final byte[] SCTE35_TIME_SIGNAL_BYTES =
-      TestUtil.joinByteArrays(
+      Bytes.concat(
           TestUtil.createByteArray(
               0, // table_id.
               0x80, // section_syntax_indicator, private_indicator, reserved, section_length(4).
@@ -63,7 +71,7 @@ public class MetadataRendererTest {
               0x00, 0x00, 0x00, 0x00)); // CRC_32 (ignored, check happens at extraction).
 
   private static final Format EMSG_FORMAT =
-      Format.createSampleFormat(null, MimeTypes.APPLICATION_EMSG, Format.OFFSET_SAMPLE_RELATIVE);
+      new Format.Builder().setSampleMimeType(MimeTypes.APPLICATION_EMSG).build();
 
   private final EventMessageEncoder eventMessageEncoder = new EventMessageEncoder();
 
@@ -136,17 +144,226 @@ public class MetadataRendererTest {
     assertThat(metadata).isEmpty();
   }
 
+  @Test
+  public void renderMetadata_withTimelyOutput() throws Exception {
+    EventMessage emsg =
+        new EventMessage(
+            "urn:test-scheme-id",
+            /* value= */ "",
+            /* durationMs= */ 1,
+            /* id= */ 0,
+            "Test data".getBytes(UTF_8));
+    byte[] encodedEmsg = eventMessageEncoder.encode(emsg);
+    List<Metadata> metadata = new ArrayList<>();
+    MetadataRenderer renderer =
+        new MetadataRenderer(/* output= */ metadata::add, /* outputLooper= */ null);
+    FakeSampleStream fakeSampleStream =
+        createFakeSampleStream(
+            ImmutableList.of(
+                sample(/* timeUs= */ 100_000, C.BUFFER_FLAG_KEY_FRAME, encodedEmsg),
+                sample(/* timeUs= */ 1_000_000, C.BUFFER_FLAG_KEY_FRAME, encodedEmsg),
+                END_OF_STREAM_ITEM));
+    fakeSampleStream.writeData(/* startPositionUs= */ 0);
+    renderer.replaceStream(
+        new Format[] {EMSG_FORMAT},
+        fakeSampleStream,
+        /* startPositionUs= */ 0L,
+        /* offsetUs= */ 0L);
+
+    // Call render() twice, the first call is to read the format and the second call will read the
+    // metadata.
+    renderer.render(/* positionUs= */ 0, /* elapsedRealtimeUs= */ 0);
+    renderer.render(/* positionUs= */ 500_000, /* elapsedRealtimeUs= */ 0);
+
+    assertThat(metadata).hasSize(1);
+    assertThat(metadata.get(0).presentationTimeUs).isEqualTo(100_000);
+  }
+
+  @Test
+  public void renderMetadata_withEarlyOutput() throws Exception {
+    EventMessage emsg =
+        new EventMessage(
+            "urn:test-scheme-id",
+            /* value= */ "",
+            /* durationMs= */ 1,
+            /* id= */ 0,
+            "Test data".getBytes(UTF_8));
+    byte[] encodedEmsg = eventMessageEncoder.encode(emsg);
+    List<Metadata> metadata = new ArrayList<>();
+    MetadataRenderer renderer =
+        new MetadataRenderer(
+            /* output= */ metadata::add,
+            /* outputLooper= */ null,
+            MetadataDecoderFactory.DEFAULT,
+            /* outputMetadataEarly= */ true);
+    FakeSampleStream fakeSampleStream =
+        createFakeSampleStream(
+            ImmutableList.of(
+                sample(/* timeUs= */ 100_000, C.BUFFER_FLAG_KEY_FRAME, encodedEmsg),
+                sample(/* timeUs= */ 1_000_000, C.BUFFER_FLAG_KEY_FRAME, encodedEmsg),
+                END_OF_STREAM_ITEM));
+    fakeSampleStream.writeData(/* startPositionUs= */ 0);
+    renderer.replaceStream(
+        new Format[] {EMSG_FORMAT},
+        fakeSampleStream,
+        /* startPositionUs= */ 0L,
+        /* offsetUs= */ 0L);
+
+    // Call render() twice, the first call is to read the format and the second call will read the
+    // metadata.
+    renderer.render(/* positionUs= */ 0, /* elapsedRealtimeUs= */ 0);
+    renderer.render(/* positionUs= */ 500_000, /* elapsedRealtimeUs= */ 0);
+
+    // The renderer outputs metadata early.
+    assertThat(metadata).hasSize(2);
+    assertThat(metadata.get(0).presentationTimeUs).isEqualTo(100_000);
+    assertThat(metadata.get(1).presentationTimeUs).isEqualTo(1_000_000);
+  }
+
+  @Test
+  public void replaceStream_withIncreasingOffsetUs_updatesPendingMetadataPresentationTime()
+      throws Exception {
+    EventMessage emsg =
+        new EventMessage(
+            "urn:test-scheme-id",
+            /* value= */ "",
+            /* durationMs= */ 1,
+            /* id= */ 0,
+            "Test data".getBytes(UTF_8));
+    byte[] encodedEmsg = eventMessageEncoder.encode(emsg);
+    List<Metadata> metadataOutput = new ArrayList<>();
+    MetadataRenderer renderer =
+        new MetadataRenderer(
+            /* output= */ metadataOutput::add,
+            /* outputLooper= */ null,
+            MetadataDecoderFactory.DEFAULT,
+            /* outputMetadataEarly= */ false);
+    FakeSampleStream fakeSampleStream =
+        createFakeSampleStream(
+            ImmutableList.of(
+                sample(/* timeUs= */ 100_000, C.BUFFER_FLAG_KEY_FRAME, encodedEmsg),
+                sample(/* timeUs= */ 200_000, C.BUFFER_FLAG_KEY_FRAME, encodedEmsg),
+                END_OF_STREAM_ITEM));
+    fakeSampleStream.writeData(/* startPositionUs= */ 0);
+    // Start of the first reading period.
+    renderer.replaceStream(
+        new Format[] {EMSG_FORMAT},
+        fakeSampleStream,
+        /* startPositionUs= */ 0L,
+        /* offsetUs= */ 0L);
+    // Read the format
+    renderer.render(/* positionUs= */ 0, /* elapsedRealtimeUs= */ 0);
+
+    // Read and render the first metadata. The second metadata is immediately read as pending.
+    // The offset is added to timeUs of the samples when reading (100_000 and 200_000).
+    renderer.render(/* positionUs= */ 99_999, /* elapsedRealtimeUs= */ 0);
+    assertThat(metadataOutput).isEmpty();
+    renderer.render(/* positionUs= */ 100_000, /* elapsedRealtimeUs= */ 0);
+    assertThat(metadataOutput).hasSize(1);
+
+    // Start of the 2nd reading period. Replace the stream with a different offset. This adjusts the
+    // presentation time of the pending metadata.
+    renderer.replaceStream(
+        new Format[] {EMSG_FORMAT},
+        fakeSampleStream,
+        /* startPositionUs= */ 0L,
+        /* offsetUs= */ 100_000L);
+    renderer.render(/* positionUs= */ 199_999, /* elapsedRealtimeUs= */ 0);
+    assertThat(metadataOutput).hasSize(1);
+
+    // Output second metadata.
+    renderer.render(/* positionUs= */ 200_000, /* elapsedRealtimeUs= */ 0);
+    assertThat(metadataOutput).hasSize(2);
+    assertThat(metadataOutput.get(0).presentationTimeUs).isEqualTo(100_000);
+    assertThat(metadataOutput.get(1).presentationTimeUs).isEqualTo(100_000);
+  }
+
+  @Test
+  public void replaceStream_withDecreasingOffsetUs_updatesPendingMetadataPresentationTime()
+      throws Exception {
+    EventMessage emsg =
+        new EventMessage(
+            "urn:test-scheme-id",
+            /* value= */ "",
+            /* durationMs= */ 1,
+            /* id= */ 0,
+            "Test data".getBytes(UTF_8));
+    byte[] encodedEmsg = eventMessageEncoder.encode(emsg);
+    List<Metadata> metadataOutput = new ArrayList<>();
+    MetadataRenderer renderer =
+        new MetadataRenderer(
+            /* output= */ metadataOutput::add,
+            /* outputLooper= */ null,
+            MetadataDecoderFactory.DEFAULT,
+            /* outputMetadataEarly= */ false);
+    FakeSampleStream fakeSampleStream =
+        createFakeSampleStream(
+            ImmutableList.of(
+                sample(/* timeUs= */ 100_000, C.BUFFER_FLAG_KEY_FRAME, encodedEmsg),
+                sample(/* timeUs= */ 200_000, C.BUFFER_FLAG_KEY_FRAME, encodedEmsg),
+                END_OF_STREAM_ITEM));
+    fakeSampleStream.writeData(/* startPositionUs= */ 0);
+    // Start of the first reading period.
+    renderer.replaceStream(
+        new Format[] {EMSG_FORMAT},
+        fakeSampleStream,
+        /* startPositionUs= */ 0L,
+        /* offsetUs= */ 100_000L);
+    // Read the format
+    renderer.render(/* positionUs= */ 0, /* elapsedRealtimeUs= */ 0);
+
+    // Read and render the first metadata. The second metadata is immediately read as pending.
+    // The offset of 0 is added to timeUs of the samples when reading (100_000 and 200_000).
+    renderer.render(/* positionUs= */ 199_999, /* elapsedRealtimeUs= */ 0);
+    assertThat(metadataOutput).isEmpty();
+    renderer.render(/* positionUs= */ 200_000, /* elapsedRealtimeUs= */ 0);
+    assertThat(metadataOutput).hasSize(1);
+
+    // Start of the 2nd reading period. Replace the stream with a different offset and adjust the
+    // presentation time of the pending metadata.
+    renderer.replaceStream(
+        new Format[] {EMSG_FORMAT},
+        fakeSampleStream,
+        /* startPositionUs= */ 0L,
+        /* offsetUs= */ 0L);
+    renderer.render(/* positionUs= */ 299_999, /* elapsedRealtimeUs= */ 0);
+    assertThat(metadataOutput).hasSize(1);
+
+    // Output second metadata.
+    renderer.render(/* positionUs= */ 300_000, /* elapsedRealtimeUs= */ 0);
+    assertThat(metadataOutput).hasSize(2);
+    assertThat(metadataOutput.get(0).presentationTimeUs).isEqualTo(100_000);
+    assertThat(metadataOutput.get(1).presentationTimeUs).isEqualTo(300_000);
+  }
+
   private static List<Metadata> runRenderer(byte[] input) throws ExoPlaybackException {
     List<Metadata> metadata = new ArrayList<>();
     MetadataRenderer renderer = new MetadataRenderer(metadata::add, /* outputLooper= */ null);
+    FakeSampleStream fakeSampleStream =
+        createFakeSampleStream(
+            ImmutableList.of(
+                sample(/* timeUs= */ 0, C.BUFFER_FLAG_KEY_FRAME, input), END_OF_STREAM_ITEM));
+    fakeSampleStream.writeData(/* startPositionUs= */ 0);
     renderer.replaceStream(
         new Format[] {EMSG_FORMAT},
-        new FakeSampleStream(EMSG_FORMAT, /* eventDispatcher= */ null, input),
+        fakeSampleStream,
+        /* startPositionUs= */ 0L,
         /* offsetUs= */ 0L);
     renderer.render(/* positionUs= */ 0, /* elapsedRealtimeUs= */ 0); // Read the format
     renderer.render(/* positionUs= */ 0, /* elapsedRealtimeUs= */ 0); // Read the data
 
     return Collections.unmodifiableList(metadata);
+  }
+
+  private static FakeSampleStream createFakeSampleStream(
+      ImmutableList<FakeSampleStream.FakeSampleStreamItem> samples) {
+    return new FakeSampleStream(
+        new DefaultAllocator(/* trimOnReset= */ true, /* individualAllocationSize= */ 1024),
+        /* mediaSourceEventDispatcher= */ null,
+        DrmSessionManager.DRM_UNSUPPORTED,
+        new DrmSessionEventListener.EventDispatcher(),
+        EMSG_FORMAT,
+        samples);
   }
 
   /**
@@ -161,7 +378,7 @@ public class MetadataRendererTest {
    */
   private static byte[] encodeTxxxId3Frame(String description, String value) {
     byte[] id3FrameData =
-        TestUtil.joinByteArrays(
+        Bytes.concat(
             "TXXX".getBytes(ISO_8859_1), // ID for a 'user defined text information frame'
             TestUtil.createByteArray(0, 0, 0, 0), // Frame size (set later)
             TestUtil.createByteArray(0, 0), // Frame flags
@@ -177,7 +394,7 @@ public class MetadataRendererTest {
     id3FrameData[frameSizeIndex] = (byte) frameSize;
 
     byte[] id3Bytes =
-        TestUtil.joinByteArrays(
+        Bytes.concat(
             "ID3".getBytes(ISO_8859_1), // identifier
             TestUtil.createByteArray(0x04, 0x00), // version
             TestUtil.createByteArray(0), // Tag flags
